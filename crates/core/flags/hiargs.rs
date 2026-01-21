@@ -4,11 +4,12 @@ Provides the definition of high level arguments from CLI flags.
 
 use std::{
     collections::HashSet,
+    io,
     path::{Path, PathBuf},
 };
 
 use {
-    bstr::BString,
+    bstr::{BString, io::BufReadExt},
     grep::printer::{ColorSpecs, SummaryKind},
 };
 
@@ -1048,6 +1049,56 @@ impl Patterns {
     }
 }
 
+fn paths_from_path(path: &Path) -> io::Result<Vec<PathBuf>> {
+    let file = std::fs::File::open(path).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("{}: {}", path.display(), err),
+        )
+    })?;
+    paths_from_reader(file).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("{}:{}", path.display(), err),
+        )
+    })
+}
+
+fn paths_from_stdin() -> io::Result<Vec<PathBuf>> {
+    let stdin = io::stdin();
+    let locked = stdin.lock();
+    paths_from_reader(locked).map_err(|err| {
+        io::Error::new(io::ErrorKind::Other, format!("<stdin>:{}", err))
+    })
+}
+
+fn paths_from_reader<R: io::Read>(rdr: R) -> io::Result<Vec<PathBuf>> {
+    let mut paths = vec![];
+    let mut line_number = 0;
+    io::BufReader::new(rdr).for_byte_line(|line| {
+        line_number += 1;
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty() {
+            return Ok(true);
+        }
+        match std::str::from_utf8(line) {
+            Ok(path) => {
+                paths.push(PathBuf::from(path));
+                Ok(true)
+            }
+            Err(err) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "{}: found invalid UTF-8 in path at byte offset {}",
+                    line_number,
+                    err.valid_up_to()
+                ),
+            )),
+        }
+    })?;
+    Ok(paths)
+}
+
 /// The collection of paths we want to search for.
 ///
 /// This guarantees that there is always at least one path.
@@ -1078,7 +1129,32 @@ impl Paths {
         // assume that all remaining positional arguments are intended to be
         // file paths.
 
-        let mut paths = Vec::with_capacity(low.positional.len());
+        let mut paths = Vec::with_capacity(
+            low.positional.len() + low.path_files.len(),
+        );
+        for path_file in low.path_files.drain(..) {
+            let file_paths = if path_file == Path::new("-") {
+                anyhow::ensure!(
+                    !state.stdin_consumed,
+                    "error reading --path-file from stdin: stdin \
+                     has already been consumed"
+                );
+                let paths = paths_from_stdin()?;
+                state.stdin_consumed = true;
+                paths
+            } else {
+                paths_from_path(&path_file)?
+            };
+            for path in file_paths {
+                if state.stdin_consumed && path == Path::new("-") {
+                    anyhow::bail!(
+                        "error: attempted to read patterns from stdin \
+                         while also searching stdin",
+                    );
+                }
+                paths.push(path);
+            }
+        }
         for osarg in low.positional.drain(..) {
             let path = PathBuf::from(osarg);
             if state.stdin_consumed && path == Path::new("-") {

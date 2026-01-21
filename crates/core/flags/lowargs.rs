@@ -35,6 +35,7 @@ pub(crate) struct LowArgs {
     pub(crate) special: Option<SpecialMode>,
     pub(crate) mode: Mode,
     pub(crate) positional: Vec<OsString>,
+    pub(crate) path_files: Vec<PathBuf>,
     pub(crate) patterns: Vec<PatternSource>,
     // Everything else, sorted lexicographically.
     pub(crate) binary: BinaryMode,

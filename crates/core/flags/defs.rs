@@ -46,6 +46,7 @@ pub(super) const FLAGS: &[&dyn Flag] = &[
     // same category.
     &Regexp,
     &File,
+    &PathFile,
     &AfterContext,
     &BeforeContext,
     &Binary,
@@ -2032,6 +2033,58 @@ arguments as files or directories to search.
     }
 }
 
+/// --path-file
+#[derive(Debug)]
+struct PathFile;
+
+impl Flag for PathFile {
+    fn is_switch(&self) -> bool {
+        false
+    }
+    fn name_long(&self) -> &'static str {
+        "path-file"
+    }
+    fn doc_variable(&self) -> Option<&'static str> {
+        Some("PATHFILE")
+    }
+    fn doc_category(&self) -> Category {
+        Category::Input
+    }
+    fn doc_short(&self) -> &'static str {
+        r"Search paths from the given file."
+    }
+    fn doc_long(&self) -> &'static str {
+        r"
+Read search paths from the given file, one per line. Empty lines are ignored.
+.sp
+When \fIPATHFILE\fP is \fB-\fP, then \fBstdin\fP will be read for paths.
+.sp
+Paths are interpreted as UTF-8 and are treated the same as positional
+arguments.
+"
+    }
+    fn completion_type(&self) -> CompletionType {
+        CompletionType::Filename
+    }
+    fn update(&self, v: FlagValue, args: &mut LowArgs) -> anyhow::Result<()> {
+        let path = PathBuf::from(v.unwrap_value());
+        args.path_files.push(path);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_path_file() {
+    let args = parse_low_raw(["--path-file", "foo"]).unwrap();
+    assert_eq!(vec![PathBuf::from("foo")], args.path_files);
+
+    let args = parse_low_raw(["--path-file=foo", "--path-file", "bar"]).unwrap();
+    assert_eq!(
+        vec![PathBuf::from("foo"), PathBuf::from("bar")],
+        args.path_files
+    );
+}
 #[cfg(test)]
 #[test]
 fn test_file() {
